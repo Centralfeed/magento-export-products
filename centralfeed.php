@@ -88,7 +88,7 @@ class AtenExporterForMagento
 
 
 	// Set the password to export data here
-	const PASSWORD = 'tmbbafcxsee3';
+	const PASSWORD = '';
 
 	// Set the centralfeed name
 	const CENTRALFEED_NAME = '';
@@ -824,7 +824,7 @@ class AtenExporterForMagento
 					FROM PFX_catalog_product_entity_media_gallery AS gallery
 						INNER JOIN PFX_catalog_product_entity_media_gallery_value AS gallery_value
 							ON gallery.value_id = gallery_value.value_id
-					WHERE   gallery_value.store_id IN (".$this->_storeId.", 0)
+					WHERE   gallery_value.store_id IN (0)
 						AND gallery_value.disabled = 0
 						AND gallery.entity_id=".$entity_id."
 						AND gallery.attribute_id = ".$MEDIA_GALLERY_ATTRIBUTE_ID."
