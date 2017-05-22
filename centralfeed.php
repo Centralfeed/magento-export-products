@@ -1,14 +1,14 @@
 <?php
 /*
  * Aten Software Product Data Exporter for Magento
- * 
+ *
  * Copyright (c) 2016. Aten Software LLC. All Rights Reserved.
  * Author: Shailesh Humbad
  * Website: https://www.atensoftware.com/p187.php
  *
  * This file is part of Aten Software Product Data Exporter for Magento.
  *
- * Aten Software Product Data Exporter for Magento is free software: 
+ * Aten Software Product Data Exporter for Magento is free software:
  * you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -25,7 +25,7 @@
  * */
 
 // Uncomment to enable debugging
-// ini_set('display_errors', '1');
+ // ini_set('display_errors', '1');
 // ini_set('error_reporting', E_ALL);
 
 // Increase memory limit
@@ -45,7 +45,7 @@ if(file_exists($MagentoRootFolder.'/app') == false
 		AtenExporterForMagento::DisplayErrorPage(
 			"Neither ./app nor ../app folders were found. ".
 			"Be sure to install this script to the root folder of the website, e.g. pub, www, or public_html.");
-	}	
+	}
 }
 
 // Determine Magento version and bootstrap file name
@@ -85,17 +85,17 @@ $exporter = new AtenExporterForMagento();
 class AtenExporterForMagento
 {
 
-
-
 	// Set the password to export data here
 	const PASSWORD = '';
 
 	// Set the centralfeed name
 	const CENTRALFEED_NAME = '';
 
+	const EXPORT_TYPE_ALL = 'all';
+	const EXPORT_TYPE_STOCK = 'stock';
 
 	// Version of this script
-	const VERSION = '2016-11-19';
+	const VERSION = '2017-05-22';
 
 	// Helper variables
 	private $_tablePrefix;
@@ -109,6 +109,16 @@ class AtenExporterForMagento
 	private $IncludeDisabled;
 	private $ExcludeOutOfStock;
 	private $DownloadAsAttachment;
+	protected $attributeCodes;
+	protected $superAttributesCode;
+	protected $frontAttributesCode;
+	protected $frontAttributesLabel;
+	protected $attributeOptions;
+	protected $PRODUCT_ENTITY_TYPE_ID;
+	protected $MEDIA_GALLERY_ATTRIBUTE_ID;
+	protected $CatalogProductEntityTableNames;
+	protected $entity;
+	protected $StagingModuleEnabled;
 
 	// Initialize the Mage application
 	function __construct()
@@ -122,7 +132,7 @@ class AtenExporterForMagento
 		if(IS_MAGENTO_2)
 		{
 			// Create bootstrap object
-			$bootstrap = \Magento\Framework\App\Bootstrap::create(BP, $_SERVER);	
+			$bootstrap = \Magento\Framework\App\Bootstrap::create(BP, $_SERVER);
 
 			$this->_objectManager = $bootstrap->getObjectManager();
 
@@ -141,20 +151,20 @@ class AtenExporterForMagento
 			$this->_tablePrefix = substr($tableName, 0, strpos($tableName, 'core_website'));
 
 			// Get database connection to Magento (PDO MySQL object)
-			$this->_dbi = Mage::getSingleton('core/resource') ->getConnection('core_read');			
+			$this->_dbi = Mage::getSingleton('core/resource') ->getConnection('core_read');
 		}
-		
+
 		// Set default fetch mode to NUM to save memory
 		$this->_dbi->setFetchMode(ZEND_DB::FETCH_NUM);
 
 		// Run the main application
 		$this->_runMain();
 	}
-	
+
 	// Run the main application and call the appropriate function
 	//   depending on the command.
 	private function _runMain()
-	{		
+	{
 		// Get the command line parameters if running in CLI-mode
 		if($this->_isCLI() == true)
 		{
@@ -163,7 +173,7 @@ class AtenExporterForMagento
 				// Get parameters from the command line
 				//  and add them to the REQUEST array
 				parse_str($_SERVER['argv'][1], $_REQUEST);
-				
+
 			}
 		}
 		// Get parameters from the REQUEST array
@@ -172,52 +182,67 @@ class AtenExporterForMagento
 		$Password = isset($_REQUEST['Password']) ? $_REQUEST['Password'] : '';
 		$this->ExcludeOutOfStock = (isset($_REQUEST['ExcludeOutOfStock']) && $_REQUEST['ExcludeOutOfStock'] == 'on') ? true : false;
 		$this->IncludeDisabled = (isset($_REQUEST['IncludeDisabled']) && $_REQUEST['IncludeDisabled'] == 'on') ? true : false;
-		$this->DownloadAsAttachment = (isset($_REQUEST['DownloadAsAttachment']) && $_REQUEST['DownloadAsAttachment'] == 'on') ? true : false;		
+		$this->DownloadAsAttachment = (isset($_REQUEST['DownloadAsAttachment']) && $_REQUEST['DownloadAsAttachment'] == 'on') ? true : false;
 
 		// If the command is export, then run the product export
 		if($Command == 'Export')
 		{
 			// Check password
 			$this->_checkPassword($Password);
-			
+
 			// Validate store and get information
 			$this->_getStoreInformation();
 
 			// Run extraction
-			$this->_runProductExport();
-			
+			$this->_runProductExport(self::EXPORT_TYPE_ALL);
+
 			// End script
 			return;
 		}
-		
+		// If the command is export, then run the product export
+		if($Command == 'StockExport')
+		{
+			// Check password
+			$this->_checkPassword($Password);
+
+			// Validate store and get information
+			$this->_getStoreInformation();
+
+			// Run extraction
+			$this->_runProductExport(self::EXPORT_TYPE_STOCK);
+
+			// End script
+			return;
+		}
+
 		// If the command is export table, then run the table export
 		if($Command == 'ExportTable')
 		{
 			// Check password
 			$this->_checkPassword($Password);
-			
+
 			// Validate store and get information
 			$this->_getStoreInformation();
 
 			// Run extraction
 			$this->_runTableExport();
-			
+
 			// End script
 			return;
-		}	
+		}
 
 		// If the command is export table, then run the table export
 		if($Command == 'DisplayForm')
 		{
 			// Check password
 			$this->_checkPassword($Password);
-			
+
 			// Display user interface
 			$this->DisplayForm();
-			
+
 			// End script
 			return;
-		}	
+		}
 
 		// If the command is not specified display the password prompt
 		if($Command == '')
@@ -227,35 +252,35 @@ class AtenExporterForMagento
 			// End script
 			return;
 		}
-		
+
 		// Display an invalid command message
 		AtenExporterForMagento::DisplayErrorPage("Invalid command specified.");
 	}
-	
+
 	// Export data from a specific table
 	private function _runTableExport()
 	{
 		// Get the table name
 		$TableName = (isset($_REQUEST['TableName']) ? $_REQUEST['TableName'] : '');
-		
+
 		// Set allowed table names
 		$AllowedTableNames = array(
 			'shipping_premiumrate',
 			'directory_currency_rate',
 		);
-		
+
 		// Validate table name
 		if(in_array($TableName, $AllowedTableNames) == false)
 		{
 			die('ERROR: Exporting the table \''.htmlentities($TableName).'\' is prohibited.');
 		}
-		
+
 		// Check if the table exists
 		if($this->_tableExists("PFX_".$TableName) == false)
 		{
 			die('ERROR: Can not export the table \''.htmlentities($TableName).'\' because it does not exist.');
 		}
-	
+
 		// Get all the column names to print the header row
 		// NOTE: Used constant TABLE_SCHEMA and TABLE_NAME to avoid directory scans
 		$query = "
@@ -271,19 +296,19 @@ class AtenExporterForMagento
 		{
 			die('ERROR: Could not get columns from table \''.htmlentities($TableName).'\'.');
 		}
-		
-		// Start sending file 
+
+		// Start sending file
 		if($this->_isCLI() == false)
 		{
 			// Set up a file name
 			$FileName = sprintf('%s.csv', $TableName);
-	
+
 			$this->_startFileSend($FileName);
 		}
-		
+
 		// Write header line
-		$this->_writeCSVLine($ColumnNames);
-		
+		$this->_writeJsonLine($ColumnNames);
+
 		// Select all the data in the table
 		$query = "SELECT * FROM PFX_".$TableName;
 		$query = $this->_applyTablePrefix($query);
@@ -298,108 +323,60 @@ class AtenExporterForMagento
 				break;
 			}
 			// Write the row
-			$this->_writeCSVLine($row);
+			$this->_writeJsonLine($row);
 		}
 	}
 
-	// Extract product data natively directly from the database
-	private function _runProductExport()
-	{
-		// Start sending file 
-		if($this->_isCLI() == false)
-		{
-			// Set up a file name
-			$FileName = sprintf('%d_%d.csv', $this->_websiteId, $this->_storeId);
-	
-			$this->_startFileSend($FileName);
-		}
-
-		// Check if staging module is enabled
-		$StagingModuleEnabled = $this->_tableExists("PFX_catalog_product_entity", array('row_id'));
-
-		// Check if Amasty Product Labels table exists
-		$AmastyProductLabelsTableExists = $this->_tableExists("PFX_am_label");
-
-		// Create a lookup table for the SKU to label_id
-		$AmastyProductLabelsLookupTable = array();
-		if($AmastyProductLabelsTableExists == true)
-		{
-			// NOTE: Only fetch simple labels and ignore all matching rules.
-			//   include_type=0 means "all matching SKUs and listed SKUs"
-			//   include_type=1 means "all matching SKUs EXCEPT listed SKUs"
-			//   include_type=2 means "listed SKUs only"
-			$query = "SELECT label_id, name, include_sku
-				FROM PFX_am_label
-				WHERE include_type IN (0,2)
-				ORDER BY pos DESC";
-			$query = $this->_applyTablePrefix($query);
-			$labelsTable = $this->_dbi->fetchAll($query);
-			// Load each label into the lookup table
-			foreach($labelsTable as $row)
-			{
-				// Get the comma-separated SKUs
-				$skus = explode(",", $row[2]);
-				// Add each SKU to the lookup table
-				foreach($skus as $sku)
-				{
-					$AmastyProductLabelsLookupTable[$sku] = array($row[0], $row[1]);
-				}
-			}
-		}
-
-		// Get product catalog flat table name
-		$CatalogProductFlatTableName = $this->_applyTablePrefix("PFX_catalog_product_flat_".$this->_storeId);
-
-		// Check if product catalog flat table exists
-		$CatalogProductFlatTableExists = $this->_tableExists(
-			$CatalogProductFlatTableName, array('url_key', 'url_path'));
-		
-		// Check if product category flat table exists
-		$CatalogCategoryFlatTableExists = $this->_tableExists(
-			"PFX_catalog_category_flat_store_".$this->_storeId);
-		
-		// Increase maximium length for group_concat (for additional image URLs field)
-		$query = "SET SESSION group_concat_max_len = 1000000;";
-		$this->_dbi->query($query);
-
-		// By default, set media gallery attribute id to 703
-		//  Look it up later
-		$MEDIA_GALLERY_ATTRIBUTE_ID = 703;
-
-
-		// Get the entity type for products
-		$query = "SELECT entity_type_id FROM PFX_eav_entity_type
-			WHERE entity_type_code = 'catalog_product'";
-		$query = $this->_applyTablePrefix($query);
-		$PRODUCT_ENTITY_TYPE_ID = $this->_dbi->fetchOne($query);
-
-		// Prepare list entity table names
-		$CatalogProductEntityTableNames = array(
-			'catalog_product_entity_datetime',
-			'catalog_product_entity_decimal',
-			'catalog_product_entity_int',
-			'catalog_product_entity_text',
-			'catalog_product_entity_varchar',
-		);
-
+	private function _initAttributesCodes(){
 		// Get attribute codes and types
 		$query = "SELECT attribute_id, attribute_code, backend_type, backend_table, frontend_input
 			FROM PFX_eav_attribute
-			WHERE entity_type_id = $PRODUCT_ENTITY_TYPE_ID
+			WHERE entity_type_id = $this->PRODUCT_ENTITY_TYPE_ID
 			";
 		$query = $this->_applyTablePrefix($query);
 		$attributes = $this->_dbi->fetchAssoc($query);
-		$attributeCodes = array();
-		$blankProduct = array();
-		$blankProduct['sku'] = '';
+		$this->attributeCodes = array();
+
+		$query = "SELECT attribute_code FROM eav_attribute WHERE attribute_id IN (SELECT attribute_id FROM catalog_product_super_attribute )";
+
+		$query = $this->_applyTablePrefix($query);
+		$this->superAttributesCode = $this->_dbi->fetchCol($query);
+
+		$query = "select attribute_code from eav_attribute where attribute_id in " .
+				 "(select attribute_id from catalog_eav_attribute where is_visible_on_front = 1)";
+
+		$query = $this->_applyTablePrefix($query);
+		$this->frontAttributesCode = $this->_dbi->fetchCol($query);
+
+
+		$query = "select attribute_code, `frontend_label` from eav_attribute where attribute_id in (select attribute_id from catalog_eav_attribute where is_visible_on_front = 1);";
+		$query = $this->_applyTablePrefix($query);
+		$frontAttributesLabelResult = $this->_dbi->fetchAll($query);
+
+		foreach ($frontAttributesLabelResult as $results)
+		{
+			$this->frontAttributesLabel[$results[0]] = $results[1];
+		}
+
+		$query = "select attribute_code, `value` from eav_attribute, eav_attribute_label where eav_attribute.`attribute_id` = eav_attribute_label.`attribute_id` " .
+		         "and eav_attribute.attribute_id in (select attribute_id from catalog_eav_attribute where is_visible_on_front = 1 and store_id = " . $this->_storeId . ");";
+
+		$query = $this->_applyTablePrefix($query);
+		$frontAttributesLabelResult = $this->_dbi->fetchAll($query);
+
+		foreach ($frontAttributesLabelResult as $results)
+		{
+			$this->frontAttributesLabel[$results[0]] = $results[1];
+		}
+
 		foreach($attributes as $row)
 		{
 			// Save attribute ID for media gallery
 			if($row['attribute_code'] == 'media_gallery')
 			{
-				$MEDIA_GALLERY_ATTRIBUTE_ID = $row['attribute_id'];
+				$this->MEDIA_GALLERY_ATTRIBUTE_ID = $row['attribute_id'];
 			}
-		
+
 			switch($row['backend_type'])
 			{
 				case 'datetime':
@@ -407,24 +384,24 @@ class AtenExporterForMagento
 				case 'int':
 				case 'text':
 				case 'varchar':
-					$attributeCodes[$row['attribute_id']] = $row['attribute_code'];
-					$blankProduct[$row['attribute_code']] = '';
-				break;
-			case 'static':
-				// ignore columns in entity table
-				// print("Skipping static attribute: ".$row['attribute_code']."\n");
-				break;
-			default:
-				// print("Unsupported backend_type: ".$row['backend_type']."\n");
-				break;
+				$this->attributeCodes[$row['attribute_id']] = $row['attribute_code'];
+					//	$blankProduct[$row['attribute_code']] = '';
+					break;
+				case 'static':
+					// ignore columns in entity table
+					// print("Skipping static attribute: ".$row['attribute_code']."\n");
+					break;
+				default:
+					// print("Unsupported backend_type: ".$row['backend_type']."\n");
+					break;
 			}
-			
+
 			// Add table name to list of value tables
 			if(isset($row['backend_table']) && $row['backend_table'] != '')
 			{
-				$CatalogProductEntityTableNames[] = $row['backend_table'];
+				$this->CatalogProductEntityTableNames[] = $row['backend_table'];
 			}
-			
+
 			// If the type is multiple choice, cache the option values
 			//   in a lookup array for performance (avoids several joins/aggregations)
 			if($row['frontend_input'] == 'select' || $row['frontend_input'] == 'multiselect')
@@ -432,10 +409,10 @@ class AtenExporterForMagento
 				// Get the option_id => value from the attribute options
 				$query = "
 					SELECT
-						 CASE WHEN SUM(aov.store_id) = 0 THEN MAX(aov.option_id) ELSE 
+						 CASE WHEN SUM(aov.store_id) = 0 THEN MAX(aov.option_id) ELSE
 							MAX(CASE WHEN aov.store_id = ".$this->_storeId." THEN aov.option_id ELSE NULL END)
 						 END AS 'option_id'
-						,CASE WHEN SUM(aov.store_id) = 0 THEN MAX(aov.value) ELSE 
+						,CASE WHEN SUM(aov.store_id) = 0 THEN MAX(aov.value) ELSE
 							MAX(CASE WHEN aov.store_id = ".$this->_storeId." THEN aov.value ELSE NULL END)
 						 END AS 'value'
 					FROM PFX_eav_attribute_option AS ao
@@ -447,160 +424,126 @@ class AtenExporterForMagento
 				";
 				$query = $this->_applyTablePrefix($query);
 				$result = $this->_dbi->fetchPairs($query);
-				
+
 				// If found, then save the lookup table in the attributeOptions array
 				if(is_array($result))
 				{
-					$attributeOptions[$row['attribute_id']] = $result;
+					$this->attributeOptions[$row['attribute_id']] = $result;
 				}
 				else
 				{
 					// Otherwise, leave a blank array
-					$attributeOptions[$row['attribute_id']] = array();
+					$this->attributeOptions[$row['attribute_id']] = array();
 				}
 				$result = null;
 			}
-			
+
 		}
-		$blankProduct['aten_product_url'] = '';
-		$blankProduct['aten_image_url'] = '';
-		$blankProduct['aten_additional_image_url'] = '';
-		$blankProduct['aten_additional_image_value_id'] = '';
-		$blankProduct['json_categories'] = '';
-		$blankProduct['json_tier_pricing'] = '';
+
+	}
+
+	private function _getBlankProductStructure($export_type){
+
+		$blankProduct = array();
+		$blankProduct['sku'] = '';
+		$blankProduct['entity_id'] = '';
 		$blankProduct['qty'] = 0;
 		$blankProduct['stock_status'] = '';
-		$blankProduct['aten_color_attribute_id'] = '';
-		$blankProduct['aten_regular_price'] = '';
-		$blankProduct['parent_id'] = '';
-		$blankProduct['entity_id'] = '';
-		$blankProduct['created_at'] = '';
-		$blankProduct['updated_at'] = '';
-		$blankProduct['centralfeed_name'] = '';
+		$blankProduct['helper_fields'] = array(
+			'status' => "");
+		if ($export_type==self::EXPORT_TYPE_ALL) {
+			$blankProduct['name'] = '';
+			$blankProduct['price'] = '';
+			$blankProduct['visibility'] = '1';
+			$blankProduct['parent_id'] = '';
+			$blankProduct['primary_image_url'] = '';
+			$blankProduct['additional_image_url'] = '';
+			$blankProduct['additional_image_value_id'] =  ' ';
+			$blankProduct['categories'] = '';
+			$blankProduct['centralfeed_name'] = '';
 
-		if($AmastyProductLabelsTableExists === true)
-		{
-			$blankProduct['amasty_label_id'] = '';
-			$blankProduct['amasty_label_name'] = '';
+			$blankProduct['options'] = array();
+			$blankProduct['custom_options'] = array();
+			$blankProduct['variations'] = array();
+			$blankProduct['attributes'] = array();
+			$blankProduct['helper_fields']['image'] = '';
 		}
-		if($CatalogProductFlatTableExists === true)
-		{
-			$blankProduct['flat_url_key'] = '';
-			$blankProduct['flat_url_path'] = '';
+		return $blankProduct;
+	}
+	private function _getBlankProductOptionsStructure($export_type){
+		$blankProductOptions = array();
+		if ($export_type==self::EXPORT_TYPE_ALL) {
+			$blankProductOptions[] = 'description';
+			$blankProductOptions[] = 'short_description';
+			$blankProductOptions[] = 'meta_title';
+			$blankProductOptions[] = 'meta_keyword';
+			$blankProductOptions[] = 'special_price';
+			$blankProductOptions[] = 'special_from_date';
+			$blankProductOptions[] = 'special_to_date';
 		}
-		
-		// Build queries for each attribute type
-		$queries = array();
-		foreach($CatalogProductEntityTableNames as $CatalogProductEntityTableName)
+		return $blankProductOptions;
+	}
+	// Extract product data natively directly from the database
+	private function _runProductExport($export_type)
+	{
+		// Start sending file
+		if($this->_isCLI() == false)
 		{
-			// Get store value if there is one, otherwise, global value
-			$AttributeTypeQuery = "
-				SELECT
-					 CASE
-						WHEN SUM(ev.store_id) = 0
-						THEN MAX(ev.value)
-						ELSE MAX(CASE WHEN ev.store_id = ".$this->_storeId." THEN ev.value ELSE NULL END)
-					 END AS 'value'
-					,ev.attribute_id
-				FROM PFX_$CatalogProductEntityTableName AS ev
-				WHERE ev.store_id IN (".$this->_storeId.", 0)";
-			// Magento 1.x has an entity_type_id column
-			if(!IS_MAGENTO_2)
-			{
-				$AttributeTypeQuery .= " AND ev.entity_type_id = $PRODUCT_ENTITY_TYPE_ID ";
-			}
-			
-			if($StagingModuleEnabled)
-			{
-				// If staging enabled, always get latest version
-				$AttributeTypeQuery .= " AND ev.row_id = 
-					(SELECT MAX(e.row_id) FROM PFX_catalog_product_entity AS e WHERE e.entity_id = @ENTITY_ID) ";
-				$AttributeTypeQuery .= " GROUP BY ev.attribute_id, ev.row_id ";
-			}
-			else
-			{
-				$AttributeTypeQuery .= " AND ev.entity_id = @ENTITY_ID ";
-				$AttributeTypeQuery .= " GROUP BY ev.attribute_id, ev.entity_id ";
-			}		
-			$queries[] = $AttributeTypeQuery;
-		}
-		$MasterProductQuery = implode(" UNION ALL ", $queries);
-		// Apply table prefix to the query
-		$MasterProductQuery = $this->_applyTablePrefix($MasterProductQuery);
-		// Clean up white-space in the query
-		$MasterProductQuery = trim(preg_replace("/\s+/", " ", $MasterProductQuery));
+			// Set up a file name
+			$FileName = sprintf('%d_%d.csv', $this->_websiteId, $this->_storeId);
 
-		// Get all entity_ids for all products in the selected store
-		//  into an array - require SKU to be defined
-		if($StagingModuleEnabled)
-		{
-			$query = "
-				SELECT cpe.entity_id, MAX(cpe.row_id) AS row_id
-				FROM PFX_catalog_product_entity AS cpe
-				INNER JOIN PFX_catalog_product_website as cpw
-					ON cpw.product_id = cpe.entity_id
-				WHERE cpw.website_id = ".$this->_websiteId."
-					AND IFNULL(cpe.sku, '') != ''
-				GROUP BY cpe.entity_id, cpe.sku
-			";
-			$query = $this->_applyTablePrefix($query);
-			$EntityRows = $this->_dbi->fetchAll($query);
+			$this->_startFileSend($FileName);
 		}
-		else
-		{
-			$query = "
-				SELECT cpe.entity_id
-				FROM PFX_catalog_product_entity AS cpe
-				INNER JOIN PFX_catalog_product_website as cpw
-					ON cpw.product_id = cpe.entity_id
-				WHERE cpw.website_id = ".$this->_websiteId."
-					AND IFNULL(cpe.sku, '') != ''
-			";
-			$query = $this->_applyTablePrefix($query);
-			// Just fetch the entity_id column to save memory
-			$EntityRows = $this->_dbi->fetchCol($query);
-		}
-		
-		// Print header row
-		$headerFields = array();
-		$headerFields[] = 'sku';
-		foreach($attributeCodes as $fieldName)
-		{
-			$headerFields[] = $fieldName;
-		}
-		$headerFields[] = 'aten_product_url';
-		$headerFields[] = 'aten_image_url';
-		$headerFields[] = 'aten_additional_image_url';
-		$headerFields[] = 'aten_additional_image_value_id';
-		$headerFields[] = 'json_categories';
-		$headerFields[] = 'json_tier_pricing';
-		$headerFields[] = 'qty';
-		$headerFields[] = 'stock_status';
-		$headerFields[] = 'aten_color_attribute_id';
-		$headerFields[] = 'aten_regular_price';
-		$headerFields[] = 'parent_id';
-		$headerFields[] = 'entity_id';
-		$headerFields[] = 'created_at';
-		$headerFields[] = 'updated_at';
-		$headerFields[] = 'centralfeed_name';
 
-		if($AmastyProductLabelsTableExists === true)
-		{
-			$headerFields[] = 'amasty_label_id';
-			$headerFields[] = 'amasty_label_name';
+		// Check if staging module is enabled
+		$this->StagingModuleEnabled = $this->_tableExists("PFX_catalog_product_entity", array('row_id'));
+
+		// Increase maximium length for group_concat (for additional image URLs field)
+		$query = "SET SESSION group_concat_max_len = 1000000;";
+		$this->_dbi->query($query);
+
+		// By default, set media gallery attribute id to 703
+		//  Look it up later
+		$this->MEDIA_GALLERY_ATTRIBUTE_ID = 703;
+
+
+		// Get the entity type for products
+		$query = "SELECT entity_type_id FROM PFX_eav_entity_type
+			WHERE entity_type_code = 'catalog_product'";
+		$query = $this->_applyTablePrefix($query);
+		$this->PRODUCT_ENTITY_TYPE_ID = $this->_dbi->fetchOne($query);
+
+		// Prepare list entity table names
+		$this->CatalogProductEntityTableNames = array(
+			'catalog_product_entity_datetime',
+			'catalog_product_entity_decimal',
+			'catalog_product_entity_int',
+			'catalog_product_entity_text',
+			'catalog_product_entity_varchar',
+		);
+
+
+		if ($export_type == self::EXPORT_TYPE_ALL){
+			$this->_initAttributesCodes();
 		}
-		if($CatalogProductFlatTableExists === true)
-		{
-			$headerFields[] = 'flat_url_key';
-			$headerFields[] = 'flat_url_path';
-		}
-		$this->_writeCSVLine($headerFields);
+
+		$blankProduct = $this->_getBlankProductStructure($export_type);
+		$blankProductOptions = $this->_getBlankProductOptionsStructure($export_type);
+
+		$MasterProductQuery = $this->_getMasterQuery();
+
+		//get data
+		$EntityRows = $this->getEntityRows();
+
+		print '[';
+		$firstLoopFlag = false;
 
 		// Loop through each product and output the data
+
 		foreach($EntityRows as $EntityRow)
 		{
 			// Get the entity_id/row_id from the row
-			if($StagingModuleEnabled)
+			if($this->StagingModuleEnabled)
 			{
 				$entity_id = $EntityRow[0];
 				$row_id = $EntityRow[1];
@@ -609,7 +552,7 @@ class AtenExporterForMagento
 			{
 				$entity_id = $EntityRow;
 			}
-		
+
 			// Check if the item is out of stock and skip if needed
 			if($this->ExcludeOutOfStock == true)
 			{
@@ -630,58 +573,28 @@ class AtenExporterForMagento
 
 			// Create a new product record
 			$product = $blankProduct;
+
 			$product['entity_id'] = $entity_id;
 
-			// Get the basic product information
-			$query = "
-				SELECT cpe.sku, cpe.created_at, cpe.updated_at, cpe.attribute_set_id, 
-					cpe.type_id, cpe.has_options, cpe.required_options, eas.attribute_set_name
-				FROM PFX_catalog_product_entity AS cpe
-				LEFT OUTER JOIN PFX_eav_attribute_set AS eas ON cpe.attribute_set_id = eas.attribute_set_id
-				WHERE cpe.entity_id = ".$entity_id."
-			";
-			$query = $this->_applyTablePrefix($query);
-			$entity = $this->_dbi->fetchRow($query);
-			if(empty($entity) == true)
+			$this->_getCurrentEntity($entity_id);
+			if(empty($this->entity) == true)
 			{
 				continue;
 			}
-			
-			// Initialize basic product data
-			$product['sku'] = $entity[0];
-			$product['created_at'] = $entity[1];
-			$product['updated_at'] = $entity[2];
-			
-			// Set label information
-			if($AmastyProductLabelsTableExists == true)
-			{
-				// Check if the SKU has a label
-				if(array_key_exists($product['sku'], $AmastyProductLabelsLookupTable) == true)
-				{
-					// Set the label ID and name
-					$product['amasty_label_id'] = $AmastyProductLabelsLookupTable[$product['sku']][0];
-					$product['amasty_label_name'] = $AmastyProductLabelsLookupTable[$product['sku']][1];
+
+			foreach($blankProduct as $field_name=>$field_value){
+				if (!is_array($field_value)){
+					$name = '_getProductDataField_' . $field_name;
+					if (method_exists ($this,$name )) {
+						$product[$field_name] = $this->{$name}($entity_id);
+					}
 				}
+				//else echo 'missing function : $this->_getProductDataField_' . $field_name;
 			}
-			
-			// Get flat table information
-			if($CatalogProductFlatTableExists === true)
-			{
-				$query = "SELECT url_key,url_path FROM $CatalogProductFlatTableName WHERE entity_id=".$entity_id;
-				$flatTableRow = $this->_dbi->fetchRow($query);
-				if(empty($flatTableRow) === false)
-				{
-					$product['flat_url_key'] = $flatTableRow[0];
-					$product['flat_url_path'] = $flatTableRow[1];
-				}
-			}
-			
+
 			// Fill the master query with the entity ID
 			$query = str_replace('@ENTITY_ID', $entity_id, $MasterProductQuery);
 			$result = $this->_dbi->query($query);
-			
-			// Escape the SKU (it may contain double-quotes)
-			$product['sku'] = $product['sku'];
 
 			// Loop through each field in the row and get the value
 			while(true)
@@ -690,36 +603,30 @@ class AtenExporterForMagento
 				// $column[0] = value
 				// $column[1] = attribute_id
 				$column = $result->fetch(Zend_Db::FETCH_NUM);
+
 				// Break if no more rows
 				if(empty($column))
 				{
 					break;
 				}
-				// Skip attributes that don't exist in eav_attribute
-				if(!isset($attributeCodes[$column[1]]))
+				// Skip attributes that don't exist in eav_attribute or null values
+				if(!isset($this->attributeCodes[$column[1]]) || is_null($column[0]))
 				{
 					continue;
 				}
 
-				// Save color attribute ID (for CJM automatic color swatches extension)
-				//  NOTE: do this prior to translating option_id to option_value below
-				if($attributeCodes[$column[1]] == 'color')
-				{
-					$product['aten_color_attribute_id'] = $column[0];
-				}
-
 				// Translate the option option_id to a value.
-				if(isset($attributeOptions[$column[1]]) == true)
+				if(isset($this->attributeOptions[$column[1]]) == true)
 				{
 					// Convert all option values
 					$optionValues = explode(',', $column[0]);
 					$convertedOptionValues = array();
 					foreach($optionValues as $optionValue)
 					{
-						if(isset($attributeOptions[$column[1]][$optionValue]) == true)
+						if(isset($this->attributeOptions[$column[1]][$optionValue]) == true)
 						{
 							// If a option_id is found, translate it
-							$convertedOptionValues[] = $attributeOptions[$column[1]][$optionValue];
+							$convertedOptionValues[] = $this->attributeOptions[$column[1]][$optionValue];
 						}
 					}
 					// Erase values that are set to zero
@@ -732,215 +639,71 @@ class AtenExporterForMagento
 						// Use convert values if any conversions exist
 						$column[0] = implode(',', $convertedOptionValues);
 					}
-					// Otherwise, leave value as-is					
+					// Otherwise, leave value as-is
 				}
 
 				// Escape double-quotes and add to product array
-				$product[$attributeCodes[$column[1]]] = $column[0];
+				if (array_key_exists ($this->attributeCodes[$column[1]],$product)){
+					$product[$this->attributeCodes[$column[1]]] = $column[0];
+				} else if (isset($product['options']) && in_array($this->attributeCodes[$column[1]],$blankProductOptions)) {
+					$product['options'][$this->attributeCodes[$column[1]]] = $column[0];
+				}
+				else if (isset($product['variations']) && in_array($this->attributeCodes[$column[1]],$this->superAttributesCode)) {
+					$product['variations'][$this->attributeCodes[$column[1]]] = $column[0];
+				}
+				else if (isset($product['attributes']) && in_array($this->attributeCodes[$column[1]],$this->frontAttributesCode)) {
+
+					if (isset($this->frontAttributesLabel[$this->attributeCodes[$column[1]]]))
+						$product['attributes'][$this->frontAttributesLabel[$this->attributeCodes[$column[1]]]] = $column[0];
+					else
+						$product['attributes'][$this->attributeCodes[$column[1]]] = $column[0];
+				}
+				else if (array_key_exists($this->attributeCodes[$column[1]],$product['helper_fields'])) {
+					$product['helper_fields'][$this->attributeCodes[$column[1]]] = $column[0];
+				}
+				else if (isset($product['custom_options'])){
+					$product['custom_options'][$this->attributeCodes[$column[1]]] = $column[0];
+				}
 			}
+
 			$result = null;
 
-			// Skip product that are disabled or have no status
+			// Skip product that are disabled
 			//  if the checkbox is not checked (this is the default setting)
 			if($this->IncludeDisabled == false)
-			{			
-				if(empty($product['status']) || $product['status'] == $this->_STATUS_DISABLED_CONST)
+			{
+				if($product['helper_fields']['status'] == $this->_STATUS_DISABLED_CONST)
 				{
 					continue;
 				}
 			}
-			
-			// Get category information, if table exists
-			if($CatalogCategoryFlatTableExists == true)
-			{
-				$query = "
-					SELECT fs.entity_id, fs.path, fs.name
-					FROM PFX_catalog_category_product_index AS pi
-						INNER JOIN PFX_catalog_category_flat_store_".$this->_storeId." AS fs
-							ON pi.category_id = fs.entity_id
-					WHERE pi.product_id = ".$entity_id."
-				";
-				$query = $this->_applyTablePrefix($query);
-				$categoriesTable = $this->_dbi->fetchAll($query);
-				// Save entire table in JSON format
-				$product['json_categories'] = json_encode($categoriesTable);
-				// Escape double-quotes
-				$product['json_categories'] = $product['json_categories'];
-			}
-			else
-			{
-				$product['json_categories'] = 'flat category table not found';
-			}
-			
-			// Get stock quantity
-			// NOTE: stock_id = 1 is the 'Default' stock
-			$query = "
-				SELECT qty, stock_status
-				FROM PFX_cataloginventory_stock_status
-				WHERE product_id=".$entity_id."
-					AND website_id=".$this->_websiteId."
-					AND stock_id = 1";
-			$query = $this->_applyTablePrefix($query);
-			$stockInfoResult = $this->_dbi->query($query);
-			$stockInfo = $stockInfoResult->fetch();
-			if(empty($stockInfo) == true)
-			{
-				$product['qty'] = '0';
-				$product['stock_status'] = '';
-			}
-			else
-			{
-				$product['qty'] = $stockInfo[0];
-				$product['stock_status'] = $stockInfo[1];
-			}
-			$stockInfoResult = null;
 
-			// Get additional image URLs
-			$galleryImagePrefix = $this->_dbi->quote($this->_mediaBaseUrl.'catalog/product');
+			$this->_getProductData_qty_and_stock($entity_id,$product);
+		    $this->_getProductGalleryInfo($row_id, $entity_id, $product);
 
-			if(IS_MAGENTO_2)
-			{
-				$query = "
-					SELECT
-						 GROUP_CONCAT(mg.value_id SEPARATOR ',') AS value_id
-						,GROUP_CONCAT(CONCAT(".$galleryImagePrefix.", mg.value) SEPARATOR ',') AS value
-					FROM PFX_catalog_product_entity_media_gallery_value_to_entity AS mgvte
-						INNER JOIN PFX_catalog_product_entity_media_gallery AS mg
-							ON mgvte.value_id = mg.value_id
-						INNER JOIN PFX_catalog_product_entity_media_gallery_value AS mgv
-							ON mg.value_id = mgv.value_id
-					WHERE   mgv.store_id IN (".$this->_storeId.", 0)
-						AND mgv.disabled = 0
-						AND ".($StagingModuleEnabled ? "mgvte.row_id=".$row_id : "mgvte.entity_id=".$entity_id)."
-						AND mg.attribute_id = ".$MEDIA_GALLERY_ATTRIBUTE_ID."
-					ORDER BY mgv.position ASC";
-			}
-			else
-			{
-				$query = "
-					SELECT
-						 GROUP_CONCAT(gallery.value_id SEPARATOR ',') AS value_id
-						,GROUP_CONCAT(CONCAT(".$galleryImagePrefix.", gallery.value) SEPARATOR ',') AS value
-					FROM PFX_catalog_product_entity_media_gallery AS gallery
-						INNER JOIN PFX_catalog_product_entity_media_gallery_value AS gallery_value
-							ON gallery.value_id = gallery_value.value_id
-					WHERE   gallery_value.store_id IN (0)
-						AND gallery_value.disabled = 0
-						AND gallery.entity_id=".$entity_id."
-						AND gallery.attribute_id = ".$MEDIA_GALLERY_ATTRIBUTE_ID."
-					ORDER BY gallery_value.position ASC";
-			}
-			$query = $this->_applyTablePrefix($query);
-			$galleryValues = $this->_dbi->fetchAll($query);
-			if(empty($galleryValues) != true)
-			{
-				// Save value IDs for CJM automatic color swatches extension support
-				$product['aten_additional_image_value_id'] = $galleryValues[0][0];
-				$product['aten_additional_image_url'] = $galleryValues[0][1];
-			}
 
-			// Get parent ID
-			$query = "
-				SELECT GROUP_CONCAT(parent_id SEPARATOR ',') AS parent_id
-				FROM PFX_catalog_product_super_link AS super_link
-				WHERE super_link.product_id=".$entity_id."";
-			$query = $this->_applyTablePrefix($query);
-			$parentId = $this->_dbi->fetchAll($query);
-			if(empty($parentId) != true)
-			{
-				// Save value IDs for CJM automatic color swatches extension support
-				$product['parent_id'] = $parentId[0][0];
-			}
+			$this->setAdditionalInfo($product);
 
-			// Get the regular price (before any catalog price rule is applied)
-			$product['aten_regular_price'] = $product['price'];
-			
-			// Override price with catalog price rule, if found
-			$query = "
-				SELECT crpp.rule_price
-				FROM PFX_catalogrule_product_price AS crpp
-				WHERE crpp.rule_date = CURDATE()
-					AND crpp.product_id = ".$entity_id."
-					AND crpp.customer_group_id = 1
-					AND crpp.website_id = ".$this->_websiteId;
-			$query = $this->_applyTablePrefix($query);
-			$rule_price = $this->_dbi->fetchAll($query);
-			if(empty($rule_price) != true)
-			{
-				// Override price with catalog rule price
-				$product['price'] = $rule_price[0][0];
-			}
-
-			// Calculate product URL
-			if(empty($product['url_path']) == false)
-			{
-				$product['aten_product_url'] = $this->_urlPathJoin($this->_webBaseUrl, $product['url_path']);
-			}
-			else if (empty($product['flat_url_path']) == false)
-			{
-				$product['aten_product_url'] = $this->_urlPathJoin($this->_webBaseUrl, $product['flat_url_path']);
-			}
-			else if (empty($product['flat_url_key']) == false)
-			{
-				$product['aten_product_url'] = $this->_urlPathJoin($this->_webBaseUrl, $product['flat_url_key'].'.html');
-			}
-			
-			// Calculate image URL
-			if(empty($product['image']) == false)
-			{
-				$product['aten_image_url'] = $this->_urlPathJoin($this->_mediaBaseUrl, 'catalog/product');
-				$product['aten_image_url'] = $this->_urlPathJoin($product['aten_image_url'], $product['image']);
-			}
-
-			// Get tier pricing information
-			$query = "
-				SELECT tp.qty, tp.value
-				FROM PFX_catalog_product_entity_tier_price AS tp
-				WHERE ".($StagingModuleEnabled ? "tp.row_id=".$row_id : "tp.entity_id=".$entity_id)."
-					AND tp.website_id IN (0, ".$this->_websiteId.")
-					AND tp.all_groups = 1
-					AND tp.customer_group_id = 0
-			";
-			$query = $this->_applyTablePrefix($query);
-			$tierPricingTable = $this->_dbi->fetchAll($query);
-			// Save entire table in JSON format
-			$product['json_tier_pricing'] = json_encode($tierPricingTable);
-			// Escape double-quotes
-			$product['json_tier_pricing'] = $product['json_tier_pricing'];
-
-			$product['json_tier_pricing'] = $product['json_tier_pricing'];
-
-			$product['centralfeed_name'] = self::CENTRALFEED_NAME;
-
-			// Print out the line in CSV format
-			$this->_writeCSVLine($product);
-		}
-
-	}
-	
-	// Write line as CSV, quoting fields if needed
-	private function _writeCSVLine(&$row)
-	{
-		$rowSize = count($row);
-		$valueCount = 0;
-		foreach($row as $value)
-		{
-			// Quote every value
-			print '"';
-			print str_replace('"', '""', $value);
-			print '"';
-			
-			// Print comma or new line
-			$valueCount++;
-			if($valueCount < $rowSize)
+			if ($firstLoopFlag)
 			{
 				print ',';
 			}
-			else
-			{
-				print "\n";
-			}
+
+			unset($product['helper_fields']);
+			// Print out the line in CSV format
+			$this->_writeJsonLine($product);
+
+			$firstLoopFlag = true;
 		}
+
+		print ']';
+	}
+
+	// Write line as CSV, quoting fields if needed
+	private function _writeJsonLine(&$row)
+	{
+		// $row = array_filter($row, 'strlen');
+ 		 print json_encode($row);
 	}
 
 	// Join two URL paths and handle forward slashes
@@ -958,12 +721,12 @@ class AtenExporterForMagento
 		header("Last-Modified: $gmdate_mod");
 
 		// Supply content headers
-		header("Content-Type: text/plain; charset=UTF-8");		
+		header("Content-Type: text/plain; charset=UTF-8");
 		$ContentDisposition = ($this->DownloadAsAttachment ? 'attachment' : 'inline');
 		header('Content-Disposition: '.$ContentDisposition.'; filename="'.$FileName.'"');
 		// NOTE: Do not supply content-length header, because the file
 		// may be sent gzip-compressed in which case the length would be wrong.
-		
+
 		// Add custom headers
 		header("X-AtenSoftware-ShoppingCart: Magento ".$this->GetMagentoVersion());
 		header("X-AtenSoftware-Version: ".self::VERSION);
@@ -971,7 +734,7 @@ class AtenExporterForMagento
 		// Turn on zlib output compression with buffer size of 8kb
 		ini_set('zlib.output_compression', 8192);
 	}
-	
+
 	// Return Magento product version
 	private function GetMagentoVersion()
 	{
@@ -985,7 +748,7 @@ class AtenExporterForMagento
 			return Mage::getVersion();
 		}
 	}
-	
+
 	// Display an error as an HTML page
 	public static function DisplayErrorPage($ErrorMessage)
 	{
@@ -996,7 +759,7 @@ class AtenExporterForMagento
 		AtenExporterForMagento::WritePageFooter();
 		exit(1);
 	}
-	
+
 	// Write common page header
 	private static function WritePageHeader()
 	{
@@ -1009,15 +772,15 @@ class AtenExporterForMagento
 	    <title>Aten Software Product Data Exporter for Magento</title>
 	    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
     </head><body><div class="container">
-    	<h2><a href="https://www.atensoftware.com/p187.php">Aten Software Product Data Exporter for Magento</a></h2><?php	
+    	<h2><a href="https://www.atensoftware.com/p187.php">Aten Software Product Data Exporter for Magento</a></h2><?php
 	}
-	
+
 	// Write common page footer
 	private static function WritePageFooter()
 	{
 	?>
-		<div class="well 5well-sm" style="text-align:center;margin-top:1em;">Copyright 2016 &middot; 
-		<a href="https://www.atensoftware.com">Aten Software LLC</a> &middot; 
+		<div class="well 5well-sm" style="text-align:center;margin-top:1em;">Copyright 2016 &middot;
+		<a href="https://www.atensoftware.com">Aten Software LLC</a> &middot;
 		Version <?php echo self::VERSION; ?></div>
 	</div>
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
@@ -1025,7 +788,7 @@ class AtenExporterForMagento
 	</body></html>
 	<?php
 	}
-	
+
 	// Get category flat table enabled or disabled
 	private function CategoryFlatIsEnabled()
 	{
@@ -1040,7 +803,7 @@ class AtenExporterForMagento
 			return Mage::helper('catalog/category_flat')->isEnabled();
 		}
 	}
-	
+
 	// Display the user interface for the exporter, as a web page
 	private function DisplayPasswordPrompt()
 	{
@@ -1057,11 +820,11 @@ class AtenExporterForMagento
 		<input type="hidden" name="Command" value="DisplayForm" />
 
 		</form>
-		
-		<p style="margin-top:1em;">For data feed services for your Magento store, 
+
+		<p style="margin-top:1em;">For data feed services for your Magento store,
 			visit <a href="https://www.atensoftware.com/">atensoftware.com</a></p>
 		<?php
-	
+
 		AtenExporterForMagento::WritePageFooter();
 	}
 
@@ -1072,7 +835,7 @@ class AtenExporterForMagento
 		?>
 
 	    <form method="get" action="" role="form">
-	    
+
 	    <?php if($this->CategoryFlatIsEnabled() == false) { ?>
 	    <div class="alert alert-warning">
 			<a href="#" class="close" data-dismiss="alert" aria-label="close">&times;</a>
@@ -1096,7 +859,7 @@ class AtenExporterForMagento
 	    </thead>
 	    <tbody>
 	    <?php
-	    
+
 		// List all active website-stores
 		if(IS_MAGENTO_2)
 		{
@@ -1108,14 +871,14 @@ class AtenExporterForMagento
 			$WebSiteTableName = "core_website";
 			$StoreTableName = "core_store";
 		}
-		
+
 		$query = "SELECT
 			 w.website_id
 			,w.name as website_name
 			,w.is_default
 			,s.store_id
 			,s.name as store_name
-		FROM PFX_$WebSiteTableName AS w 
+		FROM PFX_$WebSiteTableName AS w
 			INNER JOIN PFX_$StoreTableName AS s ON s.website_id = w.website_id
 		WHERE s.is_active = 1 AND w.website_id > 0
 		ORDER BY w.sort_order, w.name, s.sort_order, s.name";
@@ -1156,7 +919,7 @@ class AtenExporterForMagento
 	    </tbody>
 	    </table>
 		</fieldset>
-		
+
 		<fieldset class="form-group"><legend>Select product export options</legend>
 			<div class="checkbox">
 				<label for="ExcludeOutOfStock"><input type="checkbox" id="ExcludeOutOfStock" name="ExcludeOutOfStock" /> Exclude out-of-stock products (stock_status=0)</label>
@@ -1168,21 +931,21 @@ class AtenExporterForMagento
 				<label for="DownloadAsAttachment"><input type="checkbox" id="DownloadAsAttachment" name="DownloadAsAttachment" /> Check to download as a file (otherwise, the data will be displayed in your browser)</label>
 			</div>
 		</fieldset>
-		    
+
 	    <fieldset class="form-group"><legend>Run export</legend>
 		<input type="submit" value="Export the Product Data in CSV format" class="btn btn-primary btn-block" />
 		</fieldset>
-		
+
 		<input type="hidden" name="Command" value="Export" />
 		<input type="hidden" name="Password"
 			value="<?php echo (isset($_REQUEST['Password']) ? htmlentities($_REQUEST['Password']) : ''); ?>"  />
-	    
+
 	    </form>
 		<?php
-	
+
 		AtenExporterForMagento::WritePageFooter();
 	}
-	
+
 	// Die if the storeId is invalid
 	private function _getStoreInformation()
 	{
@@ -1192,7 +955,7 @@ class AtenExporterForMagento
 			AtenExporterForMagento::DisplayErrorPage(
 				'ERROR: The specified Store is not formatted correctly: '.$this->_storeId);
 		}
-		
+
 		try
 		{
 			if(IS_MAGENTO_2)
@@ -1224,7 +987,7 @@ class AtenExporterForMagento
 		}
 
 	}
-	
+
 	// Die if password is invalid
 	private function _checkPassword($Password)
 	{
@@ -1240,7 +1003,7 @@ class AtenExporterForMagento
 			AtenExporterForMagento::DisplayErrorPage('ERROR: The specified password is invalid.');
 		}
 	}
-	
+
 	// Returns true if running CLI mode
 	private function _isCLI()
 	{
@@ -1254,14 +1017,14 @@ class AtenExporterForMagento
 	{
 		// Convert table prefix
 		$TableName = $this->_applyTablePrefix($TableName);
-	
+
 		// Check if table exists in the current schema
 		// NOTE: Used constant TABLE_SCHEMA and TABLE_NAME to avoid directory scans
 		$query = "SELECT COUNT(*)
 			FROM INFORMATION_SCHEMA.COLUMNS
 			WHERE TABLE_SCHEMA=DATABASE()
 				AND TABLE_NAME='$TableName'";
-				
+
 		// Optionally check for columns
 		$MinimumColumnCount = 1;
 		if(isset($ColumnNames) && is_array($ColumnNames) && empty($ColumnNames) == false)
@@ -1269,20 +1032,20 @@ class AtenExporterForMagento
 			$query .= " AND COLUMN_NAME IN ('".implode("','", $ColumnNames)."')";
 			$MinimumColumnCount = count($ColumnNames);
 		}
-		
+
 		// Get the number of matching columns
 		$CountColumns = $this->_dbi->fetchOne($query);
-		
+
 		// Return result
 		return ($CountColumns >= $MinimumColumnCount);
 	}
-	
+
 	// Apply prefix to table names in the query
 	private function _applyTablePrefix($query)
 	{
 		return str_replace('PFX_', $this->_tablePrefix, $query);
 	}
-	
+
 	// Print the results of a select query to output for debugging purposes and exit
 	private function _debugPrintQuery($query)
 	{
@@ -1292,6 +1055,302 @@ class AtenExporterForMagento
 		exit();
 	}
 
-}
+	private function setAdditionalInfo(&$product)
+	{
+		if (isset($product['variations']) && empty($product['variations'])) {
+			$query = "SELECT attribute_code FROM eav_attribute WHERE attribute_id IN " .
+				"(SELECT attribute_id FROM catalog_product_super_attribute where product_id = " . $product['entity_id'] . ")";
+
+			$query = $this->_applyTablePrefix($query);
+			$productSuperAttributesCode = $this->_dbi->fetchCol($query);
+
+			foreach ($productSuperAttributesCode as $productSuperAttribute) {
+				$product['variations'][$productSuperAttribute] = "";
+			}
+		}
+
+		if (isset($product['visibility']) ){
+			$product['visibility'] = $product['visibility'] >= 3 ? 1 : 0;
+		}
+	}
+	/**
+	 * @return array
+	 */
+	private function getEntityRows()
+	{
+		$EntityRows = array();
+// Get all entity_ids for all products in the selected store
+		//  into an array - require SKU to be defined
+		if ($this->StagingModuleEnabled) {
+			$query = "
+				SELECT cpe.entity_id, MAX(cpe.row_id) AS row_id
+				FROM PFX_catalog_product_entity AS cpe
+				INNER JOIN PFX_catalog_product_website as cpw
+					ON cpw.product_id = cpe.entity_id
+				WHERE cpw.website_id = " . $this->_websiteId . "
+					AND IFNULL(cpe.sku, '') != ''
+				GROUP BY cpe.entity_id, cpe.sku
+			";
+			$query = $this->_applyTablePrefix($query);
+			$EntityRows = $this->_dbi->fetchAll($query);
+		} else {
+			$query = "
+				SELECT cpe.entity_id
+				FROM PFX_catalog_product_entity AS cpe
+				INNER JOIN PFX_catalog_product_website as cpw
+					ON cpw.product_id = cpe.entity_id
+				WHERE cpw.website_id = " . $this->_websiteId . "
+					AND IFNULL(cpe.sku, '') != ''
+
+			";
+			$query = $this->_applyTablePrefix($query);
+			// Just fetch the entity_id column to save memory
+			$EntityRows = $this->_dbi->fetchCol($query);
+		}
+
+		return $EntityRows;
+	}
+
+	/**
+	 * @return mixed|string
+	 */
+	private function _getMasterQuery()
+	{
+	// Build queries for each attribute type
+		$queries = array();
+		foreach ($this->CatalogProductEntityTableNames as $CatalogProductEntityTableName) {
+			// Get store value if there is one, otherwise, global value
+			$AttributeTypeQuery = "
+				SELECT
+					 CASE
+						WHEN SUM(ev.store_id) = 0
+						THEN MAX(ev.value)
+						ELSE MAX(CASE WHEN ev.store_id = " . $this->_storeId . " THEN ev.value ELSE NULL END)
+					 END AS 'value'
+					,ev.attribute_id
+				FROM PFX_$CatalogProductEntityTableName AS ev
+				WHERE ev.store_id IN (" . $this->_storeId . ", 0)";
+			// Magento 1.x has an entity_type_id column
+			if (!IS_MAGENTO_2) {
+				$AttributeTypeQuery .= " AND ev.entity_type_id = $this->PRODUCT_ENTITY_TYPE_ID ";
+			}
+
+			if ($this->StagingModuleEnabled) {
+				// If staging enabled, always get latest version
+				$AttributeTypeQuery .= " AND ev.row_id =
+					(SELECT MAX(e.row_id) FROM PFX_catalog_product_entity AS e WHERE e.entity_id = @ENTITY_ID) ";
+				$AttributeTypeQuery .= " GROUP BY ev.attribute_id, ev.row_id ";
+			} else {
+				$AttributeTypeQuery .= " AND ev.entity_id = @ENTITY_ID ";
+				$AttributeTypeQuery .= " GROUP BY ev.attribute_id, ev.entity_id ";
+			}
+			$queries[] = $AttributeTypeQuery;
+		}
+		$MasterProductQuery = implode(" UNION ALL ", $queries);
+		// Apply table prefix to the query
+		$MasterProductQuery = $this->_applyTablePrefix($MasterProductQuery);
+		// Clean up white-space in the query
+		$MasterProductQuery = trim(preg_replace("/\s+/", " ", $MasterProductQuery));
+
+		return $MasterProductQuery;
+	}
+
+	private function _getProductDataField_sku($entity_id){
+
+		$sku = $this->entity[0];
+		// Escape the SKU (it may contain double-quotes)
+		$sku=$sku;
+		return $sku;
+	}
+
+	/**
+	 * @param $entity_id
+	 * @return array
+	 */
+
+	private function _getProductDataField_categories($entity_id)
+	{
+		// Check if product category flat table exists
+		$CatalogCategoryFlatTableExists = $this->_tableExists(
+			"PFX_catalog_category_flat_store_" . $this->_storeId);
+		// Get category information, if table exists
+		if ($CatalogCategoryFlatTableExists == true) {
+
+			$query = "
+					SELECT fs.entity_id, fs.path, fs.name
+					FROM PFX_catalog_category_product_index AS pi
+						INNER JOIN PFX_catalog_category_flat_store_" . $this->_storeId . " AS fs
+							ON pi.category_id = fs.entity_id
+					WHERE pi.product_id = " . $entity_id . "
+				";
+			$query = $this->_applyTablePrefix($query);
+			$categoriesTable = $this->_dbi->fetchAll($query);
+			// Save entire table in JSON format
+			$categories = $categoriesTable; //json_encode($categoriesTable);
+			// Escape double-quotes
+			$categories = $categories;
+			return $categories;
+		} else {
+			return 'flat category table not found';
+		}
+	}/**
+	 * @param $entity_id
+	 * @return array
+	 */
+	private function _getCurrentEntity($entity_id)
+	{
+// Get the basic product information
+		$query = "
+				SELECT cpe.sku, cpe.created_at, cpe.updated_at, cpe.attribute_set_id,
+					cpe.type_id, cpe.has_options, cpe.required_options, eas.attribute_set_name
+				FROM PFX_catalog_product_entity AS cpe
+				LEFT OUTER JOIN PFX_eav_attribute_set AS eas ON cpe.attribute_set_id = eas.attribute_set_id
+				WHERE cpe.entity_id = " . $entity_id . "
+			";
+		$query = $this->_applyTablePrefix($query);
+		$this->entity = $this->_dbi->fetchRow($query);
+	}
+
+	/**
+	 * @param $entity_id
+	 * @return int
+	 */
+	private function _getProductDataField_parent_id($entity_id)
+	{
+	// Get parent ID
+		$query = "
+				SELECT GROUP_CONCAT(parent_id SEPARATOR ',') AS parent_id
+				FROM PFX_catalog_product_super_link AS super_link
+				WHERE super_link.product_id=" . $entity_id . "";
+		$query = $this->_applyTablePrefix($query);
+		$parentId = $this->_dbi->fetchAll($query);
+		if (empty($parentId) != true) {
+			// Save value IDs for CJM automatic color swatches extension support
+			return $parentId[0][0];
+		}
+		return $parentId;
+	}/**
+	 * @param $entity_id
+	 * @return array
+	 */
+	private function _getProductDataField_price($entity_id)
+	{
+
+		// Override price with catalog price rule, if found
+		$query = "
+				SELECT crpp.rule_price
+				FROM PFX_catalogrule_product_price AS crpp
+				WHERE crpp.rule_date = CURDATE()
+					AND crpp.product_id = " . $entity_id . "
+					AND crpp.customer_group_id = 1
+					AND crpp.website_id = " . $this->_websiteId;
+		$query = $this->_applyTablePrefix($query);
+		$rule_price = $this->_dbi->fetchAll($query);
+		if (empty($rule_price) != true) {
+			// Override price with catalog rule price
+			return $rule_price[0][0];
+		}
+	}
+	/**
+	 * @param $arg
+	 * @return mixed
+	 */
+	private function _getProductDataField_centralfeed_name($arg)
+	{
+		return self::CENTRALFEED_NAME;
+	}/**
+	 * @param $entity_id
+	 * @param $product
+	 * @return array
+	 */
+	private function _getProductData_qty_and_stock($entity_id, &$product)
+	{
+		// Get stock quantity
+		// NOTE: stock_id = 1 is the 'Default' stock
+		$query = "
+				SELECT qty, stock_status
+				FROM PFX_cataloginventory_stock_status
+				WHERE product_id=" . $entity_id . "
+					AND website_id=" . $this->_websiteId . "
+					AND stock_id = 1";
+		$query = $this->_applyTablePrefix($query);
+		$stockInfoResult = $this->_dbi->query($query);
+		$stockInfo = $stockInfoResult->fetch();
+		if (empty($stockInfo) == true) {
+			$qty = '0';
+			$stock_status = '';
+		} else {
+			$qty = $stockInfo[0];
+			$stock_status = $stockInfo[1];
+		}
+		unset($stockInfoResult);
+
+		if (isset($product['qty'])) $product['qty'] = $qty;
+		if (isset($product['stock_status'])) $product['stock_status'] = $stock_status;
+	}
+
+	/**
+	 * @param $row_id
+	 * @param $entity_id
+	 * @param $product
+	 * @return array
+	 */
+	private function _getProductGalleryInfo($row_id, $entity_id, &$product)
+	{
+		if (isset($product['helper_fields']['image'])){
+
+			// Get additional image URLs
+			$galleryImagePrefix = $this->_dbi->quote($this->_mediaBaseUrl . 'catalog/product');
+
+			if (IS_MAGENTO_2) {
+				$query = "
+						SELECT
+							 GROUP_CONCAT(mg.value_id SEPARATOR ',') AS value_id
+							,GROUP_CONCAT(CONCAT(" . $galleryImagePrefix . ", mg.value) SEPARATOR ',') AS value
+						FROM PFX_catalog_product_entity_media_gallery_value_to_entity AS mgvte
+							INNER JOIN PFX_catalog_product_entity_media_gallery AS mg
+								ON mgvte.value_id = mg.value_id
+							INNER JOIN PFX_catalog_product_entity_media_gallery_value AS mgv
+								ON mg.value_id = mgv.value_id
+						WHERE   mgv.store_id IN (" . $this->_storeId . ", 0)
+							AND mgv.disabled = 0
+							AND " . ($this->StagingModuleEnabled ? "mgvte.row_id=" . $row_id : "mgvte.entity_id=" . $entity_id) . "
+							AND mg.attribute_id = " . $this->MEDIA_GALLERY_ATTRIBUTE_ID . "
+						ORDER BY mgv.position ASC";
+			} else {
+				$query = "
+						SELECT
+							 GROUP_CONCAT(gallery.value_id SEPARATOR ',') AS value_id
+							,GROUP_CONCAT(CONCAT(" . $galleryImagePrefix . ", gallery.value) SEPARATOR ',') AS value
+						FROM PFX_catalog_product_entity_media_gallery AS gallery
+							INNER JOIN PFX_catalog_product_entity_media_gallery_value AS gallery_value
+								ON gallery.value_id = gallery_value.value_id
+						WHERE   gallery_value.store_id IN (0)
+							AND gallery_value.disabled = 0
+							AND gallery.entity_id=" . $entity_id . "
+							AND gallery.attribute_id = " . $this->MEDIA_GALLERY_ATTRIBUTE_ID . "
+						ORDER BY gallery_value.position ASC";
+			}
+			$query = $this->_applyTablePrefix($query);
+			$galleryValues = $this->_dbi->fetchAll($query);
+
+			if (empty($galleryValues) != true) {
+				// Save value IDs for CJM automatic color swatches extension support
+				if (isset($product['additional_image_url']))
+					$product['additional_image_url'] = empty($galleryValues[0][1]) ? [] : explode(',', $galleryValues[0][1]);
+				if (isset($product['additional_image_value_id']))
+					$product['additional_image_value_id'] = empty($galleryValues[0][0]) ? [] : explode(',', $galleryValues[0][0]);
+			}
+
+			// Calculate image URL
+			if (isset($product['primary_image_url'] ) && empty($product['helper_fields']['image']) == false) {
+				$product['primary_image_url'] = $this->_urlPathJoin($this->_mediaBaseUrl, 'catalog/product');
+				$product['primary_image_url'] = $this->_urlPathJoin($product['primary_image_url'], $product['helper_fields']['image']);
+				return array($query, $product);
+			}
+		}
+	}
+
+	}
 
 ?>
