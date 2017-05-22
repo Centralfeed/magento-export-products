@@ -9,3 +9,6 @@ How to use:
 
 3. Load centralfeed.php file in your browser, for example http://www.mystore.com/centralfeed.php 
 or by url http://www.mystore.com/centralfeed.php.php?Command=Export&Store=1&Password=ABCDEFG
+
+4. To export only the stock from catalog you can send the "StockExport" value under the Command parameter, for example
+http://www.mystore.com/centralfeed.php.php?Command=StockExport&Store=1&Password=ABCDEFG
