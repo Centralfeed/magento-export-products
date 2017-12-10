@@ -64,6 +64,16 @@ else
 	AtenExporterForMagento::DisplayErrorPage("boostrap.php/Mage.php file not found in ./app or ../app folder");
 }
 
+// Determine if centralfeed.php is inside pub folder - relevant for Magento 2 only
+if(file_exists($MagentoRootFolder.'/pub/centralfeed.php') == true)
+{
+	define("IS_CENTRALFEED_FILE_IN_PUB", true);
+}
+else
+{
+	define("IS_CENTRALFEED_FILE_IN_PUB", false);
+}
+
 // Set working directory to magento root folder
 chdir($MagentoRootFolder);
 
@@ -1265,13 +1275,18 @@ class AtenExporterForMagento
 	 */
 	private function _getProductData_qty_and_stock($entity_id, &$product)
 	{
+		// ROBIN NOTE: in magento 2 , quantity is a global attribute and the website_id in 
+		// cataloginventory_stock_status table is always 0, if in future there will be an option
+		// to apply diferent quantities for different websites then $this->_websiteId should be used
+		// instead of 0
+		$currentWibsiteId = IS_MAGENTO_2 ? 0 : $this->_websiteId;
 		// Get stock quantity
 		// NOTE: stock_id = 1 is the 'Default' stock
 		$query = "
 				SELECT qty, stock_status
 				FROM PFX_cataloginventory_stock_status
 				WHERE product_id=" . $entity_id . "
-					AND website_id=" . $this->_websiteId . "
+					AND website_id=" . $currentWibsiteId . "
 					AND stock_id = 1";
 		$query = $this->_applyTablePrefix($query);
 		$stockInfoResult = $this->_dbi->query($query);
@@ -1333,11 +1348,22 @@ class AtenExporterForMagento
 			}
 			$query = $this->_applyTablePrefix($query);
 			$galleryValues = $this->_dbi->fetchAll($query);
-
+      
 			if (empty($galleryValues) != true) {
 				// Save value IDs for CJM automatic color swatches extension support
-				if (isset($product['additional_image_url']))
+				if (isset($product['additional_image_url'])) {
 					$product['additional_image_url'] = empty($galleryValues[0][1]) ? [] : explode(',', $galleryValues[0][1]);
+          // remove 'pub' from images path
+          if (IS_CENTRALFEED_FILE_IN_PUB) {
+            foreach ($product['additional_image_url'] as $key => $value) {
+              $product['additional_image_url'][$key] = str_replace(
+                  $this->_webBaseUrl . 'pub/', 
+                  $this->_webBaseUrl,
+                  $value
+                );
+            }
+          }
+        }
 				if (isset($product['additional_image_value_id']))
 					$product['additional_image_value_id'] = empty($galleryValues[0][0]) ? [] : explode(',', $galleryValues[0][0]);
 			}
@@ -1346,6 +1372,14 @@ class AtenExporterForMagento
 			if (isset($product['primary_image_url'] ) && empty($product['helper_fields']['image']) == false) {
 				$product['primary_image_url'] = $this->_urlPathJoin($this->_mediaBaseUrl, 'catalog/product');
 				$product['primary_image_url'] = $this->_urlPathJoin($product['primary_image_url'], $product['helper_fields']['image']);
+        // remove 'pub' from image path
+        if (IS_CENTRALFEED_FILE_IN_PUB) {
+          $product['primary_image_url'] = str_replace(
+                  $this->_webBaseUrl . 'pub/', 
+                  $this->_webBaseUrl,
+                  $product['primary_image_url']
+                );
+        }
 				return array($query, $product);
 			}
 		}
