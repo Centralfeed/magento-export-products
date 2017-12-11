@@ -654,7 +654,9 @@ class AtenExporterForMagento
 
 				// Escape double-quotes and add to product array
 				if (array_key_exists ($this->attributeCodes[$column[1]],$product)){
-					$product[$this->attributeCodes[$column[1]]] = $column[0];
+					if ($this->attributeCodes[$column[1]] !== 'price' || empty($product['price'])) {
+						$product[$this->attributeCodes[$column[1]]] = $column[0];
+					}
 				} else if (isset($product['options']) && in_array($this->attributeCodes[$column[1]],$blankProductOptions)) {
 					$product['options'][$this->attributeCodes[$column[1]]] = $column[0];
 				}

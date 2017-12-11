@@ -3,7 +3,7 @@ This magento product export based on Aten Software Product Data Exporter for Mag
 
 How to use:
 
-1. Open centralfeed.php and around line 91 add your password to const PASSWORD, and around line 94 add your company name to const CENTRALFEED_NAME 
+1. Open centralfeed.php and around line 99 add your password to const PASSWORD, and around line 102 add your company name to const CENTRALFEED_NAME 
 
 2. Upload centralfeed.php file to your web server under public html folder (or any sub folder you want in it).
 
